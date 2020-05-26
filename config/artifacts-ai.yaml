@@ -14,13 +14,6 @@ artifacts:
       - delete self:/platforms/
     remote_unzip: true
 
-  test_tools:
-    glob_path: ./work/ignite-test-tools-1.0.0*.jar
-
-  piclient:
-    type: piclient
-    glob_path:  ./work/piclient-*.jar
-
   zookeeper:
     type: zookeeper
     glob_path: ./work/zookeeper*.gz
