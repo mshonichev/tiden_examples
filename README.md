@@ -9,6 +9,7 @@ Playground for Tiden Ignite examples before publication.
     cd tiden_pkg
     bash ./build.sh
     bash ./install.sh
+    bash ./tests.sh
 ```
 
 ## Run examples
@@ -19,4 +20,11 @@ https://git-lfs.github.com/
     git clone git@github.com:mshonichev/tiden_examples.git
     cd tiden_examples
     bash ./run.sh
+```
+
+## Remove Tiden python package
+
+```
+    cd tiden_pkg
+    bash ./uninstall.sh
 ```
