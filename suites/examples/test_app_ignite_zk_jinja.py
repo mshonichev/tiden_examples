@@ -5,6 +5,7 @@ from tiden.apps.ignite import Ignite
 from tiden.case.apptestcase import AppTestCase
 from tiden.util import log_print, require, attr
 
+
 class TestAppIgniteZkJinja(AppTestCase):
 
     def __init__(self, *args):

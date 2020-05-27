@@ -1,0 +1,8 @@
+artifacts:
+  flamegraph:
+    type: async_flamegraph
+    glob_path: ./work/*async_flamegraph*.zip
+    remote_unzip: true
+#environment:
+#  yardstick:
+#    profiler: async_flamegraph
