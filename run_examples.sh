@@ -3,5 +3,7 @@
 run_tests.py \
     --ts=examples \
     --tc=config/env_mshonichev.yaml \
-    --tc=config/artifacts-ai.yaml
+    --tc=config/artifacts-ai.yaml \
+    --clean=tests
+
 

@@ -1,0 +1,8 @@
+artifacts:
+  gatling:
+    type: gatling
+    glob_path: ./work/gatling-test/target/gatling-test-*-with-dependencies.jar
+    mvn:
+      build_path: ./work/gatling-test/
+      mvn_args: assembly:assembly -DskipTests
+
