@@ -1,6 +1,6 @@
 #!/bin/bash
 
-run_tests.py \
+tiden run-tests \
     --ts=gatling \
     --tc=config/env_mshonichev.yaml \
     --tc=config/plugins-maven.yaml \

@@ -1,6 +1,24 @@
+#!/usr/bin/env python3
+#
+# Copyright 2017-2020 GridGain Systems.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 from tiden.apps import App, NodeStatus
-from tiden import TidenException, log_print
+from tiden import TidenException, log_print, log_put
 from copy import deepcopy
+from time import time, sleep
+from sys import stdout
 
 
 class Gatling(App):
@@ -9,8 +27,10 @@ class Gatling(App):
     test_dir = None
 
     scenario = None
-    args = None
+    scenario_args = None
     jvm_options = None
+
+    start_timeout = 5
 
     class_name = 'io.gatling.app.Gatling'
     default_jvm_options = [
@@ -33,6 +53,7 @@ class Gatling(App):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self.start_timeout = Gatling.start_timeout
 
     def setup(self):
         super().setup()
@@ -61,16 +82,93 @@ class Gatling(App):
             'log': "%s/%s" % (self.test_dir, "node.%d.%s.%d.log" % (node_idx, self.name, run_counter)),
         })
 
-    def start(self, scenario, args, jvm_options=None):
+    def start(self, scenario, scenario_args, jvm_options=None):
+        def _pack_val(arg, val):
+            res = str(val)
+            if ' ' in res:
+                return '"' + '-D' + arg + '=' + res + '"'
+            return '-D' + arg + '=' + res
+
         self.scenario = scenario
-        self.args = deepcopy(args)
+        self.scenario_args = deepcopy(scenario_args)
         self.jvm_options = Gatling.default_jvm_options.copy()
         if jvm_options:
             self.jvm_options.extend(jvm_options)
         self.jvm_options.extend([
-            '-D' + arg + '=' + str(val) for arg, val in self.args.items()
+            _pack_val(arg, val) for arg, val in self.scenario_args.items()
         ])
         self.start_nodes()
+        self.wait_scenario_started()
+
+    def wait_scenario_started(self):
+        started_log_message = f'Simulation {self.scenario} started...'
+        self.wait_message(started_log_message, timeout=self.start_timeout)
+
+    def wait_scenario_completed(self, timeout):
+        completed_log_message = f'Simulation {self.scenario} completed'
+        self.wait_message(completed_log_message, timeout=timeout)
+
+    def stop(self):
+        self.kill_nodes()
+
+    def _print_wait_for(self, message, node_idxs, time, timeout, done):
+        log_put(f"Waiting for '{message}' at nodes [{', '.join(node_idxs)}], {time}/{timeout} sec")
+        if done:
+            stdout.flush()
+            log_print('')
+
+    def wait_message(self, message, nodes_idx=None, timeout=30):
+        if nodes_idx is None:
+            node_idxs = self.nodes.keys().copy()
+        elif isinstance(nodes_idx, int):
+            node_idxs = [nodes_idx]
+        else:
+            node_idxs = [int(node_idx) for node_idx in nodes_idx]
+
+        self.wait_for(
+            action=lambda: self.grep_log(*node_idxs, message={'regex': message}),
+            condition=lambda result: all([
+                node_id in result and
+                'message' in result[node_id] and
+                result[node_id]['message'] == message
+                for node_id in node_idxs
+            ]),
+            timeout=timeout,
+            interval=2,
+            progress_ticks=3,
+            progress=lambda t, done: self._print_wait_for(message, node_idxs, t, timeout, done)
+        )
+
+    def wait_for(
+            self,
+            condition=lambda x: True,
+            action=lambda: None,
+            timeout=30,
+            interval=1,
+            progress_ticks=5,
+            progress=lambda t, done: None,
+            failed=lambda x: False,
+            success=lambda x: True
+    ):
+        end_time = time() + timeout
+        i = 0
+        progress(end_time - time(), False)
+        try:
+            while True:
+                result = action()
+                if condition(result):
+                    return success(result)
+                elif failed is not None and failed(result):
+                    return False
+                if time() > end_time:
+                    return False
+                sleep(interval)
+                if progress and progress_ticks and i % progress_ticks == 0:
+                    progress(end_time - time(), False)
+                i += 1
+        finally:
+            if progress:
+                progress(end_time - time(), True)
 
     def start_nodes(self):
         start_command = {}
@@ -158,3 +256,4 @@ class Gatling(App):
             return self.config['environment']['gatling'].get('server_hosts', [])
         else:
             return self.config['environment'].get('server_hosts', [])
+

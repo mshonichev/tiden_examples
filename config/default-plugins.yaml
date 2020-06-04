@@ -6,6 +6,8 @@ plugins:
   JavaKiller:
     force_setup: false
 
+  EnvExpander:
+
   TestResultsCollector:
     version: '1.0.0'
     # method or class or run
@@ -14,7 +16,7 @@ plugins:
       - "zip -v --symlinks -r _logs.zip . -i {include_mask} -x {exclude_mask}"
     download_masks:
       - "_logs.zip"
-    unpack_logs: false
+    unpack_logs: true
 
 
 #  SlackPlugin:
