@@ -135,7 +135,7 @@ class Gatling(JavaApp):
         for scenario_name, scenario_files in scenarios_files.items():
             local_path = path.join(self.test_dir, 'results', scenario_name)
             makedirs(local_path, exist_ok=True)
-            self.ssh.download_from_nodes(self.nodes, scenario_files, local_path)
+            self.ssh.download_from_nodes(self.nodes, scenario_files, local_path, prepend_host=False)
 
         return scenarios_files.keys()
 
