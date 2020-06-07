@@ -118,7 +118,7 @@ class Gatling(JavaApp):
             f'           mv $file $res_file;'
             f'           cd $(dirname $res_file);'
             f'           tar -czf $(basename $res_file).tar.gz $(basename $res_file) 2>>pack_errors.txt 1>&2;'
-            f'           res=$?'
+            f'           res=$?; '
             f'           cd {node["run_dir"]}/results;'
             f'           if [ $res -eq 0 ]; then'
             f'             rm $res_file;'

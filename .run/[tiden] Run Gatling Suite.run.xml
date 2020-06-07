@@ -12,7 +12,7 @@
     <option name="ADD_CONTENT_ROOTS" value="true" />
     <option name="ADD_SOURCE_ROOTS" value="true" />
     <option name="SCRIPT_NAME" value="/usr/local/bin/tiden" />
-    <option name="PARAMETERS" value="run-tests --ts=gatling --tc=config/artifacts-gatling.yaml --tc=config/artifacts-ai.yaml --tc=config/env_mshonichev.yaml --tc=config/plugins-maven.yaml --clean=tests" />
+    <option name="PARAMETERS" value="run-tests --ts=gatling --tc=config/artifacts-gatling.yaml --tc=config/artifacts-ai.yaml --tc=config/env_${USER}.yaml --tc=config/plugins-maven.yaml --clean=tests" />
     <option name="SHOW_COMMAND_LINE" value="false" />
     <option name="EMULATE_TERMINAL" value="false" />
     <option name="MODULE_MODE" value="false" />

@@ -17,12 +17,13 @@
 from apps.gatling import Gatling
 from tiden.apps.ignite import Ignite
 from tiden.case.apptestcase import AppTestCase
-from tiden.util import log_print
-
-import time
+from tiden.util import log_print, with_setup
 
 
 class TestGatling (AppTestCase):
+
+    ignite_app: Ignite = property(lambda self: self.get_app('ignite'), None)
+    gatling_app: Gatling = property(lambda self: self.get_app('gatling'), None)
 
     def __init__(self, *args):
         super().__init__(*args)
@@ -32,35 +33,33 @@ class TestGatling (AppTestCase):
     def setup(self):
         self.create_app_config_set(
             Ignite,
-            addresses=self.get_ignite_hosts(),
+            addresses=self.ignite_app.get_hosts('server'),
             zookeeper_enabled=False,
         )
         super().setup()
 
-    def get_ignite_hosts(self):
-        if 'ignite' in self.tiden.config['environment']:
-            return self.tiden.config['environment']['ignite'].get('server_hosts', [])
-        else:
-            return self.tiden.config['environment'].get('server_hosts', [])
+    def setup_test(self):
+        self.ignite_app.set_node_option(
+            '*', 'config', Ignite.config_builder.get_config('server')
+        )
+        self.ignite_app.start_nodes()
+        self.ignite_app.cu.activate()
 
+    def teardown_test(self):
+        self.gatling_app.stop(wait=False)
+        self.ignite_app.stop_nodes(force=True)
+
+    @with_setup(setup_test, teardown_test)
     def test_run_gatling_test(self):
         """
         Start Ignite, put some load onto REST endpoint
         """
-        gatling_app: Gatling = self.get_app('gatling')
-        ignite_app: Ignite = self.get_app('ignite')
-        ignite_app.set_node_option(
-            '*', 'config', Ignite.config_builder.get_config('server')
-        )
-        ignite_app.start_nodes()
-        ignite_app.cu.activate()
-
-        rest_host = ignite_app.nodes[1]['host']
-        rest_port = ignite_app.nodes[1]['rest_port']
+        rest_host = self.ignite_app.nodes[1]['host']
+        rest_port = self.ignite_app.nodes[1]['rest_port']
         load_url = f"http://{rest_host}:{rest_port}/ignite?cmd=top"
         log_print(f"Starting HTTP Load -> {load_url}")
-        duration = 10
-        gatling_app.start(
+        duration = 60
+        self.gatling_app.start(
             scenario="perftest.HttpLoadScenario",
             scenario_args={
                 "base_url": load_url,
@@ -70,7 +69,6 @@ class TestGatling (AppTestCase):
                 "page_name": "Cluster topology"
             },
         )
-        gatling_app.stop(wait=True, timeout=duration + 10)
-        simulation_results = gatling_app.fetch_simulation_results()
-        gatling_app.generate_report(simulation_results)
-
+        self.gatling_app.wait_scenario_completed(timeout=duration + 10)
+        simulation_results = self.gatling_app.fetch_simulation_results()
+        self.gatling_app.generate_report(simulation_results)
