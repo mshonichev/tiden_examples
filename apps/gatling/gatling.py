@@ -14,25 +14,20 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from tiden.apps import App, NodeStatus
-from tiden import TidenException, log_print, log_put
+
 from copy import deepcopy
-from time import time, sleep
-from sys import stdout
+from tiden.apps.javaapp import JavaApp
+from tiden.sshpool import SshPool
+from os import makedirs, path
 
 
-class Gatling(App):
-    gatling_home = None
-    gatling_jar = None
-    test_dir = None
-
+class Gatling(JavaApp):
     scenario = None
     scenario_args = None
-    jvm_options = None
-
-    start_timeout = 5
+    scenario_jvm_options = None
 
     class_name = 'io.gatling.app.Gatling'
+
     default_jvm_options = [
         '-server',
         '-Xms512M',
@@ -53,50 +48,11 @@ class Gatling(App):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.start_timeout = Gatling.start_timeout
-
-    def setup(self):
-        super().setup()
-        self.gatling_jar = self.config['artifacts'][self.name]['remote_path']
-        self.gatling_home = "%s/%s" % (self.config['rt']['remote']['test_module_dir'], self.name)
-        self.add_nodes()
-
-    def add_nodes(self):
-        for host in self.get_hosts():
-            for node_idx in range(0, self.get_servers_per_host()):
-                self.add_node(host)
-
-    def add_node(self, host=None):
-        node_idx = len(self.nodes)
-        self.nodes[node_idx] = {
-            'host': host,
-            'status': NodeStatus.NEW,
-            'run_dir': "%s/%s" % (self.gatling_home, "server.%d" % node_idx)
-        }
-
-    def rotate_node_log(self, node_idx):
-        run_counter = 0 if 'run_counter' not in self.nodes[node_idx] else self.nodes[node_idx]['run_counter'] + 1
-        self.test_dir = self.config['rt']['remote']['test_dir']
-        self.nodes[node_idx].update({
-            'run_counter': run_counter,
-            'log': "%s/%s" % (self.test_dir, "node.%d.%s.%d.log" % (node_idx, self.name, run_counter)),
-        })
 
     def start(self, scenario, scenario_args, jvm_options=None):
-        def _pack_val(arg, val):
-            res = str(val)
-            if ' ' in res:
-                return '"' + '-D' + arg + '=' + res + '"'
-            return '-D' + arg + '=' + res
-
         self.scenario = scenario
         self.scenario_args = deepcopy(scenario_args)
-        self.jvm_options = Gatling.default_jvm_options.copy()
-        if jvm_options:
-            self.jvm_options.extend(jvm_options)
-        self.jvm_options.extend([
-            _pack_val(arg, val) for arg, val in self.scenario_args.items()
-        ])
+        self.scenario_jvm_options = jvm_options
         self.start_nodes()
         self.wait_scenario_started()
 
@@ -108,152 +64,145 @@ class Gatling(App):
         completed_log_message = f'Simulation {self.scenario} completed'
         self.wait_message(completed_log_message, timeout=timeout)
 
-    def stop(self):
+    def stop(self, wait=True, timeout=120):
+        if wait:
+            self.wait_scenario_completed(timeout)
         self.kill_nodes()
 
-    def _print_wait_for(self, message, node_idxs, time, timeout, done):
-        log_put(f"Waiting for '{message}' at nodes [{', '.join(node_idxs)}], {time}/{timeout} sec")
-        if done:
-            stdout.flush()
-            log_print('')
+    def get_node_args(self, node_idx):
+        return f'-nr -s {self.scenario}'
 
-    def wait_message(self, message, nodes_idx=None, timeout=30):
-        if nodes_idx is None:
-            node_idxs = self.nodes.keys().copy()
-        elif isinstance(nodes_idx, int):
-            node_idxs = [nodes_idx]
-        else:
-            node_idxs = [int(node_idx) for node_idx in nodes_idx]
+    def get_node_jvm_options(self, node_idx):
+        def _pack_val(arg, val):
+            res = str(val)
+            if ' ' in res:
+                return '"' + '-D' + arg + '=' + res + '"'
+            return '-D' + arg + '=' + res
 
-        self.wait_for(
-            action=lambda: self.grep_log(*node_idxs, message={'regex': message}),
-            condition=lambda result: all([
-                node_id in result and
-                'message' in result[node_id] and
-                result[node_id]['message'] == message
-                for node_id in node_idxs
-            ]),
-            timeout=timeout,
-            interval=2,
-            progress_ticks=3,
-            progress=lambda t, done: self._print_wait_for(message, node_idxs, t, timeout, done)
+        jvm_options_arr = [super().get_node_jvm_options(node_idx)]
+        if self.scenario_jvm_options:
+            jvm_options_arr.extend(self.scenario_jvm_options)
+        jvm_options_arr.extend([
+            _pack_val(arg, val) for arg, val in self.scenario_args.items()
+        ])
+
+        return ' '.join(jvm_options_arr)
+
+    def fetch_simulation_results(self, unpack=True):
+        """
+        Fetch Gatling simulation results to test directory
+        :param unpack: unpack fetched archives after downloading
+        :return: list of fetched simulation runs directories
+        """
+        # Gatling produces simulation results into
+        # {run_dir}/results/<scenarioname>-<timestamp>/simulation.log
+        # files.
+        # We rename and pack each file one by one to
+        # {run_dir}/results/<scenarioname>-<timestamp>/<node_id>-<timestamp>-simulation.log.tar.gz
+        # removing original simulation.log files to conserve space
+        # then download all files to
+        # {test_dir}/results/<scenarioname>-<mintimestamp>/<node_id>-<timestamp>-simulation.log.tar.gz
+        # where <mintimestamp> is min <timestamp> over nodes.
+        # then unpack and remove logs one by one
+
+        result = self.ssh.exec_at_nodes(
+            self.nodes, lambda node_idx, node:
+            f'if [ -d {node["run_dir"]}/results ]; then'
+            f'  cd {node["run_dir"]}/results; '
+            f'  ls -1 | while read dir; do'
+            f'    if [ -d $dir ]; then '
+            f'      stamp=$(echo $dir | cut -d "-" -f 2);'
+            f'      for file in $dir/*.*; do'
+            f'         if [ -f $file ]; then'
+            f'           res_file=$(dirname $file)/{node_idx}-$stamp-$(basename $file);'
+            f'           mv $file $res_file;'
+            f'           cd $(dirname $res_file);'
+            f'           tar -czf $(basename $res_file).tar.gz $(basename $res_file) 2>>pack_errors.txt 1>&2;'
+            f'           res=$?'
+            f'           cd {node["run_dir"]}/results;'
+            f'           if [ $res -eq 0 ]; then'
+            f'             rm $res_file;'
+            f'             echo $res_file.tar.gz;'
+            f'           fi;'
+            f'        fi;'
+            f'      done;'
+            f'    fi;'
+            f'  done;'
+            f'fi'
         )
+        scenarios_files = self._get_scenarios_files(result)
 
-    def wait_for(
-            self,
-            condition=lambda x: True,
-            action=lambda: None,
-            timeout=30,
-            interval=1,
-            progress_ticks=5,
-            progress=lambda t, done: None,
-            failed=lambda x: False,
-            success=lambda x: True
-    ):
-        end_time = time() + timeout
-        i = 0
-        progress(end_time - time(), False)
-        try:
-            while True:
-                result = action()
-                if condition(result):
-                    return success(result)
-                elif failed is not None and failed(result):
-                    return False
-                if time() > end_time:
-                    return False
-                sleep(interval)
-                if progress and progress_ticks and i % progress_ticks == 0:
-                    progress(end_time - time(), False)
-                i += 1
-        finally:
-            if progress:
-                progress(end_time - time(), True)
+        for scenario_name, scenario_files in scenarios_files.items():
+            local_path = path.join(self.test_dir, 'results', scenario_name)
+            makedirs(local_path, exist_ok=True)
+            self.ssh.download_from_nodes(self.nodes, scenario_files, local_path)
 
-    def start_nodes(self):
-        start_command = {}
-        pids = {}
-        nodes_to_start = []
-        for node_idx, node in self.nodes.items():
-            self.rotate_node_log(node_idx)
-            nodes_to_start.append(node_idx)
-            host = node['host']
-            if host not in start_command:
-                start_command[host] = []
-            start_command[host].extend(self.get_node_start_commands(node_idx))
-            pids[node_idx] = len(start_command[host]) - 1
-            node['status'] = NodeStatus.STARTING
-        log_print("Start gatling node(s): %s" % nodes_to_start)
-        result = self.ssh.exec(start_command)
-        for node_idx, node in self.nodes.items():
-            host = node['host']
-            node['pid'] = int(result[host][pids[node_idx]].strip())
-            if not node['pid']:
-                raise TidenException(f"Can't start application {self.name} node {node_idx} at host {host}")
-        check_command = {}
-        status = {}
-        for node_idx, node in self.nodes.items():
-            host = node['host']
-            if host not in check_command:
-                check_command[host] = []
-            check_command[host].extend(self.get_node_check_commands(node_idx))
-            status[node_idx] = len(check_command[host]) - 1
-        result = self.ssh.exec(check_command)
-        for node_idx, node in self.nodes.items():
-            host = node['host']
-            if not result[host][status[node_idx]]:
-                raise TidenException(f"Can't start application {self.name} node {node_idx} at host {host}")
-            node['status'] = NodeStatus.STARTED
-            log_print(f"Gatling node {node_idx} started on {host} with PID {node['pid']}")
+        return scenarios_files.keys()
 
-    def start_node(self, node_idx):
-        self.rotate_node_log(node_idx)
-        node = self.nodes[node_idx]
-        host = node['host']
-        start_commands = self.get_node_start_commands(node_idx)
-        start_command = {host: start_commands}
-        node['status'] = NodeStatus.STARTING
-        log_print("Start gatling node(s): %s" % [node_idx])
-        result = self.ssh.exec(start_command)
-        node['pid'] = int(result[host][len(start_commands) - 1].strip())
-        check_commands = self.get_node_check_commands(node_idx)
-        check_command = {host: check_commands}
-        result = self.ssh.exec(check_command)
-        if not result[host][0]:
-            raise TidenException(f"Can't start application {self.name} node {node_idx} at host {host}")
-        node['status'] = NodeStatus.STARTED
-        log_print(f"Gatling node {node_idx} started on {host} with PID {node['pid']}")
+    def _get_scenarios_files(self, results):
+        scenario_files = {}
+        all_data = {
+            node_id: node_data.rstrip().splitlines() for node_id, node_data in results.items()
+        }
+        if not all_data:
+            return {}
+        scenario_count = 0
+        scenario_names = {}
+        scenario_data = {}
+        for node_id, node_data in all_data.items():
+            node_scenario_dirnames = {}
+            for filepath in node_data:
+                if '/' not in filepath:
+                    continue
+                dir_name, filename = filepath.split('/')
+                if dir_name not in node_scenario_dirnames.keys():
+                    node_scenario_dirnames[dir_name] = []
+                node_scenario_dirnames[dir_name].append(dir_name + '/' + filename)
+            node_scenario_count = len(node_scenario_dirnames)
+            if scenario_count < node_scenario_count:
+                scenario_count = node_scenario_count
+            for scenario_n, dir_name in enumerate(node_scenario_dirnames):
+                if scenario_n not in scenario_names:
+                    scenario_names[scenario_n] = []
+                scenario_names[scenario_n].append(dir_name)
+                if scenario_n not in scenario_data:
+                    scenario_data[scenario_n] = {}
+                scenario_data[scenario_n][node_id] = node_scenario_dirnames[dir_name].copy()
 
-    def get_node_check_commands(self, node_idx):
-        return [
-            'sleep 1; pid -p %d -f | grep java 2>/dev/null' % self.nodes[node_idx]['pid'],
-        ]
+        for scenario_n, scenario_node_names in scenario_names.items():
+            min_timestamp = None
+            scenario_name = None
+            for scenario_node_name in scenario_node_names:
+                if '-' not in scenario_node_name:
+                    continue
+                node_scenario_name, node_timestamp = scenario_node_name.split('-')
+                if scenario_name is None:
+                    scenario_name = node_scenario_name
+                else:
+                    if scenario_name != node_scenario_name:
+                        continue
+                if min_timestamp is None:
+                    min_timestamp = node_timestamp
+                else:
+                    if int(min_timestamp) > int(node_timestamp):
+                        min_timestamp = node_timestamp
+            if scenario_name is None:
+                continue
+            scenario_name = scenario_name + '-' + min_timestamp
+            scenario_files[scenario_name] = deepcopy(scenario_data[scenario_n])
 
-    def get_node_start_commands(self, node_idx):
-        return [
-            'mkdir -p %s' % self.nodes[node_idx]['run_dir'],
-            'cd %s; nohup java %s -cp %s %s -nr -s %s 1>%s 2>&1 & echo $!' % (
-                self.nodes[node_idx]['run_dir'],
-                ' '.join(self.jvm_options),
-                self.gatling_jar,
-                self.class_name,
-                self.scenario,
-                self.nodes[node_idx]['log'],
-            ),
-        ]
+        return scenario_files
 
-    def get_servers_per_host(self):
-        if 'gatling' in self.config['environment']:
-            return int(self.config['environment']['gatling'].get('servers_per_host', 1))
+    def generate_report(self, simulation_name, remove=True):
+        """
+        Generate HTML reports from fetched simulation results
+        :param simulation_name:
+        :param remove: remove original files after generation
+        :return:
+        """
+        if type(simulation_name) == type(''):
+            simulation_names = [simulation_name]
         else:
-            return int(self.config['environment'].get('servers_per_host', 1))
-
-    def check_requirements(self):
-        self.require_artifact('gatling')
-
-    def get_hosts(self):
-        if 'gatling' in self.config['environment']:
-            return self.config['environment']['gatling'].get('server_hosts', [])
-        else:
-            return self.config['environment'].get('server_hosts', [])
-
+            simulation_names = simulation_name
+        for simulation_name in simulation_names:
+            pass

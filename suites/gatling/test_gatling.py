@@ -53,23 +53,24 @@ class TestGatling (AppTestCase):
             '*', 'config', Ignite.config_builder.get_config('server')
         )
         ignite_app.start_nodes()
+        ignite_app.cu.activate()
 
         rest_host = ignite_app.nodes[1]['host']
         rest_port = ignite_app.nodes[1]['rest_port']
         load_url = f"http://{rest_host}:{rest_port}/ignite?cmd=top"
         log_print(f"Starting HTTP Load -> {load_url}")
+        duration = 10
         gatling_app.start(
             scenario="perftest.HttpLoadScenario",
             scenario_args={
                 "base_url": load_url,
-                "duration": 60,
+                "duration": duration,
                 "load_factor": 100,
                 "load_throttle": 5,
                 "page_name": "Cluster topology"
             },
         )
-
-        time.sleep(70)
-        gatling_app.stop()
-        gatling_app.fetch_simulation_results()
+        gatling_app.stop(wait=True, timeout=duration + 10)
+        simulation_results = gatling_app.fetch_simulation_results()
+        gatling_app.generate_report(simulation_results)
 
