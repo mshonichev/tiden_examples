@@ -93,3 +93,13 @@ Gatling suite uses custom application and plugin to build and run Gatling scenar
 ```bash
     bash ./run_gatling.sh
 ```
+
+Additionally, you may collect async profiler information from Ignite nodes under load. 
+For that, make sure kernel settings are tuned properly at your remote hosts: 
+ * sys.kernel.perf_event_paranoid = 1
+ * sys.kernel.kptr_restrict = 0
+
+See https://github.com/jvm-profiling-tools/async-profiler#basic-usage for more information
+```bash
+    bash ./run_gatling_with_flamegraph.sh
+```

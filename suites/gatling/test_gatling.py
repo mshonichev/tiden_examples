@@ -63,14 +63,15 @@ class TestGatling (AppTestCase):
         warmup = 60
         cooldown = 10
 
+        rest_port = self.ignite_app.nodes[1]['rest_port']
+        rest_host = self.ignite_app.nodes[1]['host']
+        load_url = f"http://{rest_host}:{rest_port}/ignite?cmd=top"
+
         if self.has_profiler():
             log_print(f"Start profiling Ignite nodes")
             self.profiler_app.update_options(nodes=self.ignite_app.nodes, warmup=warmup, duration=duration-cooldown)
             self.profiler_app.start()
 
-        rest_port = self.ignite_app.nodes[1]['rest_port']
-        rest_host = self.ignite_app.nodes[1]['host']
-        load_url = f"http://{rest_host}:{rest_port}/ignite?cmd=top"
         log_print(f"Starting HTTP Load -> {load_url}")
         self.gatling_app.start(
             scenario="perftest.HttpLoadScenario",
@@ -82,7 +83,6 @@ class TestGatling (AppTestCase):
                 "page_name": "Cluster topology"
             },
         )
-
         self.gatling_app.wait_scenario_completed(timeout=duration + warmup + cooldown)
 
         simulation_results = self.gatling_app.fetch_simulation_results()
@@ -94,12 +94,16 @@ class TestGatling (AppTestCase):
             log_print(f'Detailed report: file:///{self.gatling_app.test_dir}/results/{simulation_name}/index.html')
 
         if self.has_profiler():
-            profiling_files = self.tiden.ssh.ls(dir_path=self.profiler_app.remote_test_dir + '/*.svg', params='-1')
+            profiling_files = self.tiden.ssh.ls(
+                hosts=self.ignite_app.get_hosts('server'),
+                dir_path=self.ignite_app.remote_test_dir + '/*.svg',
+                params='-1'
+            )
             local_dir = path.join(self.profiler_app.test_dir, 'profile')
             makedirs(local_dir, exist_ok=True)
             local_profiling_files = self.tiden.ssh.download(profiling_files, local_dir)
             for file in local_profiling_files:
-                log_print(f'Flamegraph: file:///{self.profiler_app.test_dir}/profile/{file}')
+                log_print(f'Flamegraph: file:///{file}')
 
     def has_profiler(self):
         return 'flamegraph' in self.tiden.config['artifacts']
