@@ -1,10 +1,10 @@
 plugins:
 
-#  DockerCleaner:
-#    force_setup: false
-#
-#  JavaKiller:
-#    force_setup: false
+  DockerCleaner:
+    force_setup: false
+
+  JavaKiller:
+    force_setup: false
 
   EnvExpander:
     ignore_vars: [PATH, JAVA_HOME]

@@ -16,9 +16,12 @@
 
 
 from copy import deepcopy
+from multiprocessing.dummy import Pool as ThreadPool
+from os import makedirs, path, cpu_count
+from itertools import chain
+
 from tiden.apps.javaapp import JavaApp
-from tiden.sshpool import SshPool
-from os import makedirs, path
+from tiden.util import local_run
 
 
 class Gatling(JavaApp):
@@ -88,22 +91,26 @@ class Gatling(JavaApp):
 
         return ' '.join(jvm_options_arr)
 
-    def fetch_simulation_results(self, unpack=True):
+    def fetch_simulation_results(self, local_unpack=True, remote_remove=True):
         """
         Fetch Gatling simulation results to test directory
-        :param unpack: unpack fetched archives after downloading
+        :param local_unpack: unpack fetched archives after downloading
+        :param remote_remove: remove remote archives after downloading
         :return: list of fetched simulation runs directories
         """
-        # Gatling produces simulation results into
+        # Gatling nodes produces simulation results into
         # {run_dir}/results/<scenarioname>-<timestamp>/simulation.log
         # files.
+        #
         # We rename and pack each file one by one to
         # {run_dir}/results/<scenarioname>-<timestamp>/<node_id>-<timestamp>-simulation.log.tar.gz
         # removing original simulation.log files to conserve space
-        # then download all files to
+        #
+        # Then download all files to
         # {test_dir}/results/<scenarioname>-<mintimestamp>/<node_id>-<timestamp>-simulation.log.tar.gz
         # where <mintimestamp> is min <timestamp> over nodes.
-        # then unpack and remove logs one by one
+        #
+        # Then unpack local if needed and remove remote one by one
 
         result = self.ssh.exec_at_nodes(
             self.nodes, lambda node_idx, node:
@@ -112,17 +119,20 @@ class Gatling(JavaApp):
             f'  ls -1 | while read dir; do'
             f'    if [ -d $dir ]; then '
             f'      stamp=$(echo $dir | cut -d "-" -f 2);'
-            f'      for file in $dir/*.*; do'
+            f'      for file in $dir/*.log; do'
             f'         if [ -f $file ]; then'
             f'           res_file=$(dirname $file)/{node_idx}-$stamp-$(basename $file);'
             f'           mv $file $res_file;'
             f'           cd $(dirname $res_file);'
             f'           tar -czf $(basename $res_file).tar.gz $(basename $res_file) 2>>pack_errors.txt 1>&2;'
-            f'           res=$?; '
+            f'           res=$?;'
             f'           cd {node["run_dir"]}/results;'
             f'           if [ $res -eq 0 ]; then'
             f'             rm $res_file;'
             f'             echo $res_file.tar.gz;'
+            f'           else'
+            f'             echo $res_file;'
+            f'             echo $(dirname $res_file)/pack_errors.txt;'
             f'           fi;'
             f'        fi;'
             f'      done;'
@@ -132,10 +142,48 @@ class Gatling(JavaApp):
         )
         scenarios_files = self._get_scenarios_files(result)
 
+        local_files = []
         for scenario_name, scenario_files in scenarios_files.items():
             local_path = path.join(self.test_dir, 'results', scenario_name)
             makedirs(local_path, exist_ok=True)
-            self.ssh.download_from_nodes(self.nodes, scenario_files, local_path, prepend_host=False)
+            local_files.extend(
+                self.ssh.download_from_nodes(self.nodes, scenario_files, local_path, prepend_host=False)
+            )
+
+        if remote_remove:
+            node_commands = {
+                node_id: '; '.join(chain(*[
+                    [
+                        'rm ' + self.nodes[node_id]['run_dir'] + '/' + file
+                        for file in scenarios_files[scenario_name][node_id]
+                    ] for scenario_name in scenarios_files if node_id in scenarios_files[scenario_name]
+                ]))
+                for node_id in self.nodes
+            }
+            self.ssh.exec_at_nodes(
+                self.nodes,
+                lambda node_id, node: node_commands[node_id]
+            )
+
+        if local_unpack:
+            def _unpack(file):
+                from tarfile import TarFile
+                from os import unlink
+                _dir = path.dirname(file)
+                with TarFile.open(file, 'r:*') as z:
+                    for member in z.getnames():
+                        z.extract(member, _dir)
+                    z.close()
+                unlink(file)
+
+            files_to_unpack = []
+            for file in local_files:
+                if file.endswith('tar.gz'):
+                    files_to_unpack.append(file)
+            pool = ThreadPool(max(1, int(cpu_count()/2)))
+            pool.map(_unpack, files_to_unpack)
+            pool.close()
+            pool.join()
 
         return scenarios_files.keys()
 
@@ -157,7 +205,7 @@ class Gatling(JavaApp):
                 dir_name, filename = filepath.split('/')
                 if dir_name not in node_scenario_dirnames.keys():
                     node_scenario_dirnames[dir_name] = []
-                node_scenario_dirnames[dir_name].append(dir_name + '/' + filename)
+                node_scenario_dirnames[dir_name].append('results/' + dir_name + '/' + filename)
             node_scenario_count = len(node_scenario_dirnames)
             if scenario_count < node_scenario_count:
                 scenario_count = node_scenario_count
@@ -198,11 +246,44 @@ class Gatling(JavaApp):
         Generate HTML reports from fetched simulation results
         :param simulation_name:
         :param remove: remove original files after generation
-        :return:
+        :return: dict of simulation stats for each simulation name
         """
+        result = {}
         if type(simulation_name) == type(''):
             simulation_names = [simulation_name]
         else:
             simulation_names = simulation_name
+        results_dir = path.join(self.test_dir, 'results')
         for simulation_name in simulation_names:
-            pass
+            simulation_dir = path.join(results_dir, simulation_name)
+            java_args = [
+                '-cp',
+                self.config['artifacts'][self.app_type]['path'],
+                self.__class__.class_name,
+                '-ro',
+                simulation_name,
+                '-rf',
+                results_dir,
+            ]
+            simulation_stats = local_run(
+                proc='java',
+                env={},
+                args=java_args,
+                cwd=simulation_dir,
+                timeout=60,
+            )
+            result[simulation_name] = []
+            s = 0
+            for line in simulation_stats.splitlines():
+                if s == 0 and line.startswith('===='):
+                    s = 1
+                elif s == 1:
+                    if line.startswith('===='):
+                        break
+                    result[simulation_name].append(line)
+            with open(path.join(simulation_dir, 'simulation_stats.txt'), 'w') as file:
+                file.write(simulation_stats)
+                file.close()
+        return result
+
+

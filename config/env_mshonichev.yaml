@@ -34,6 +34,9 @@ environment:
   ]
   client_hosts:
     - '172.25.1.23'
+    - '172.25.1.21'
+    - '172.25.1.22'
+    - '172.25.1.27'
   clients_per_host: 2
   client_jvm_options: ['-Xmx4g', '-Xms4g', '-XX:+UseG1GC', '-Djava.net.preferIPv4Stack=true']
   zookeeper_total_nodes: 1
