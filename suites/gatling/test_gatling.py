@@ -96,7 +96,7 @@ class TestGatling (AppTestCase):
         if self.has_profiler():
             profiling_files = self.tiden.ssh.ls(dir_path=self.profiler_app.remote_test_dir + '/*.svg', params='-1')
             local_dir = path.join(self.profiler_app.test_dir, 'profile')
-            makedirs(local_dir, exists_ok=True)
+            makedirs(local_dir, exist_ok=True)
             local_profiling_files = self.tiden.ssh.download(profiling_files, local_dir)
             for file in local_profiling_files:
                 log_print(f'Flamegraph: file:///{self.profiler_app.test_dir}/profile/{file}')
