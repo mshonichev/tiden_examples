@@ -65,6 +65,6 @@ class TestWithSetup(GeneralTestCase):
         pass
 
     @known_issue('IGN-1')
-    def test_known_issue_passed(self):
+    def test_known_issue_failed(self):
         assert False
 
