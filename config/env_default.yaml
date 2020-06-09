@@ -1,12 +1,9 @@
 environment:
-  username: $USER
+  username: ${USER}
   private_key_path: /home/${USER}/.ssh/${USER}_keys
-  home: /storage/ssd/${USER}/tiden
-  shared_home: /mnt/lab_share01/${USER}/tiden
-  apps_use_global_hosts: True
-  server_hosts:
-    - '172.25.1.24'
-  servers_per_host: 2
+  home: /home/${USER}/tiden
+  server_hosts: []
+  servers_per_host: 1
   server_jvm_options: [
     '-Xmx8g',
     '-Xms8g',
@@ -32,12 +29,8 @@ environment:
     '-XX:+PrintGCApplicationStoppedTime',
     '-XX:+PrintGC',
   ]
-  client_hosts:
-    - '172.25.1.23'
-    - '172.25.1.21'
-    - '172.25.1.22'
-    - '172.25.1.27'
-  clients_per_host: 2
+  client_hosts: []
+  clients_per_host: 1
   client_jvm_options: ['-Xmx4g', '-Xms4g', '-XX:+UseG1GC', '-Djava.net.preferIPv4Stack=true']
   zookeeper_total_nodes: 1
   logger:
@@ -49,6 +42,3 @@ environment:
     JAVA_HOME: $JDK_ORA_18
     PATH: $JDK_ORA_18/bin:$PATH
 zookeeper_enabled: false
-plugins:
-    EnvExpander:
-        ignore_vars: [PATH, JDK_ORA_18]

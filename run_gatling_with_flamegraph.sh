@@ -11,5 +11,6 @@ tiden run-tests \
     --tc=config/plugins-maven.yaml \
     --tc=config/artifacts-ai.yaml \
     --tc=config/artifacts-gatling.yaml \
+    --tc=config/artifacts-flamegraph.yaml \
     --clean=tests
 
