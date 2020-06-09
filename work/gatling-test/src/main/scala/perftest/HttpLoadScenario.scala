@@ -8,13 +8,14 @@ import scala.concurrent.duration._
 
 class HttpLoadScenario extends Simulation {
 
-  val baseUrl = System.getProperty("baseUrl", "https://google.com/")
+  val base_url = System.getProperty("base_url", "https://google.com/")
   var duration = Integer.getInteger("duration", 60)
   var load_factor = Integer.getInteger("load_factor", 1)
   var load_throttle = Integer.getInteger("load_throttle", 10)
+  var page_name = System.getProperty("page_name", "Root page")
 
   val httpProtocol: HttpProtocolBuilder = http
-    .baseUrl(baseUrl)
+    .baseUrl(base_url)
     .inferHtmlResources()
     .acceptHeader("*/*")
     .acceptEncodingHeader("gzip, deflate")
@@ -28,7 +29,7 @@ class HttpLoadScenario extends Simulation {
 
   object BasicLoad {
     val start =
-      exec(http("Root page")
+      exec(http(page_name)
         .get("")
       )
   }

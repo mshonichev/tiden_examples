@@ -1,5 +1,5 @@
 <component name="ProjectRunConfigurationManager">
-  <configuration default="false" name="[tiden] Run Gatling Suite" type="PythonConfigurationType" factoryName="Python">
+  <configuration default="false" name="[tiden] Run Examples Suite" type="PythonConfigurationType" factoryName="Python">
     <module name="tiden_examples" />
     <option name="INTERPRETER_OPTIONS" value="" />
     <option name="PARENT_ENVS" value="true" />
@@ -12,7 +12,7 @@
     <option name="ADD_CONTENT_ROOTS" value="true" />
     <option name="ADD_SOURCE_ROOTS" value="true" />
     <option name="SCRIPT_NAME" value="/usr/local/bin/tiden" />
-    <option name="PARAMETERS" value="run-tests --ts=gatling --tc=config/artifacts-gatling.yaml --tc=config/artifacts-ai.yaml --tc=config/artifacts-flamegraph.yaml --tc=config/env_${USER}.yaml --tc=config/plugins-maven.yaml --clean=tests" />
+    <option name="PARAMETERS" value="run-tests --ts=examples --tc=config/artifacts-ai.yaml --tc=config/env_${USER}.yaml --clean=tests" />
     <option name="SHOW_COMMAND_LINE" value="false" />
     <option name="EMULATE_TERMINAL" value="false" />
     <option name="MODULE_MODE" value="false" />

@@ -12,6 +12,11 @@ artifacts:
       - delete self:/docs/
       - delete self:/libs/optional/
       - delete self:/platforms/
+      - delete self:/LICENSE
+      - delete self:/NOTICE
+      - delete self:/README.txt
+      - delete self:/MIGRATION_GUIDE.txt
+      - delete self:/RELEASE_NOTES.txt
     remote_unzip: true
 
   zookeeper:
