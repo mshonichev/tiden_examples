@@ -8,6 +8,7 @@ plugins:
 
   EnvExpander:
     ignore_vars: [PATH, JAVA_HOME]
+    expand_vars: [PREV_IGNITE_VERSION]
 
   TestResultsCollector:
     version: '1.0.0'
